@@ -1,0 +1,39 @@
+# Ignore Go binary files
+main
+
+# Ignore dependency directories
+/vendor/
+node_modules/
+
+# Ignore compiled object files
+*.o
+*.a
+*.so
+
+# Ignore database dumps
+*.dump.gz
+
+# Ignore backup folder
+backups/
+mongo-data/
+
+# Ignore Docker-related files
+docker-compose.override.yml
+docker-compose.override.yml
+
+# Ignore log files and directories
+*.log
+logs/
+*.log.*
+
+# Ignore OS generated files
+.DS_Store
+Thumbs.db
+
+# Ignore GoLand IDE project files
+.idea/
+*.iml
+
+# Ignore system files
+*.swp
+*~
