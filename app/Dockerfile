@@ -1,5 +1,5 @@
 # Utiliza uma imagem base oficial do Go como uma etapa de build
-FROM golang:1.20 AS builder
+FROM golang:1.21.0-bullseye AS builder
 
 # Defina o diretório de trabalho dentro do contêiner
 WORKDIR /app
@@ -22,6 +22,8 @@ FROM debian:bullseye-slim
 # Defina o diretório de trabalho dentro do contêiner
 WORKDIR /app
 
+# Defina variáveis de ambiente para conexão
+ENV ...
 # Instala as ferramentas de banco de dados MongoDB
 RUN apt-get update && apt-get install -y wget && \
     wget https://fastdl.mongodb.org/tools/db/mongodb-database-tools-ubuntu2004-x86_64-100.7.4.deb && \

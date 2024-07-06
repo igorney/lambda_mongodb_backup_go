@@ -1,81 +1,91 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"time"
+
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
 )
 
-func handler(ctx context.Context) (string, error) {
-	start := time.Now() // Marcar o início da execução
-
-	// Valores hardcoded
-	mongodbURI := "[MONGO_URI]"
-	backupFolder := "/app/backups/"
-
-	// Certifique-se de que a pasta de backup existe
-	if _, err := os.Stat(backupFolder); os.IsNotExist(err) {
-		if err := os.MkdirAll(backupFolder, 0755); err != nil {
-			return "Failed to create backup folder", err
-		}
-	}
-	folderCreationTime := time.Since(start)
-	fmt.Printf("Tempo para criar/verificar pasta de backup: %s\n", folderCreationTime)
-
-	// Construção dos comandos
+func handler(_ context.Context) (string, error) {
+	start := time.Now()
+	uri := os.Getenv("MONGODB_URI")
 	timestamp := time.Now().Format("20060102T150405")
-	backupName := fmt.Sprintf("%s.dump.gz", timestamp)
-	localBackupPath := fmt.Sprintf("%s%s", backupFolder, backupName)
-	localLatestPath := fmt.Sprintf("%slatest.dump.gz", backupFolder)
+	archivePath := fmt.Sprintf("/app/backups/%s.dump.gz", timestamp)
+	s3Bucket := "ufabc-next"
+	s3Key := fmt.Sprintf("mongodb-next-backup/%s.dump.gz", timestamp)
 
-	mongodumpCmd := []string{"mongodump", "--uri", mongodbURI, "--archive=" + localBackupPath, "--gzip"}
+	// Step 1: Construct mongodump command
+	command := exec.Command("mongodump", "--uri", uri, "--archive="+archivePath, "--gzip")
+	log.Printf("Running mongodump command: %v", command.Args)
+	step1 := time.Now()
 
-	// Execução dos comandos com timeout
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute) // Timeout de 10 minutos
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, mongodumpCmd[0], mongodumpCmd[1:]...)
-	var out, stderr bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &stderr
-
-	fmt.Println("Running mongodump command:", mongodumpCmd)
-	mongodumpStart := time.Now()
-	err := cmd.Run()
-	mongodumpDuration := time.Since(mongodumpStart)
-	fmt.Printf("Tempo de execução do mongodump: %s\n", mongodumpDuration)
-
-	if ctx.Err() == context.DeadlineExceeded {
-		fmt.Printf("Backup command timed out\n")
-		return "Backup command timed out", ctx.Err()
-	}
+	// Step 2: Execute mongodump command
+	output, err := command.CombinedOutput()
+	step2 := time.Now()
 	if err != nil {
-		fmt.Printf("Backup failed: %s\n", err)
-		fmt.Printf("Stderr: %s\n", stderr.String())
-		fmt.Printf("Stdout: %s\n", out.String())
-		return fmt.Sprintf("Backup failed: %s\nStderr: %s\nStdout: %s", err, stderr.String(), out.String()), err
+		log.Printf("Backup failed: %v", err)
+		log.Printf("Stderr: %s", output)
+		return "Backup failed", err
 	}
+	log.Printf("Backup completed successfully")
+	log.Printf("Stdout: %s", output)
 
-	// Copiar o backup para o arquivo mais recente
-	copyStart := time.Now()
-	input, err := os.ReadFile(localBackupPath)
+	// Step 3: Upload to S3
+	err = uploadToS3(s3Bucket, s3Key, archivePath)
+	step3 := time.Now()
 	if err != nil {
-		return fmt.Sprintf("Failed to read backup file: %s", err), err
+		log.Printf("Failed to upload to S3: %v", err)
+		return "Failed to upload to S3", err
+	}
+	log.Printf("Upload to S3 completed successfully")
+
+	// Log times
+	log.Printf("Time to construct command: %d ms", step1.Sub(start).Milliseconds())
+	log.Printf("Time to execute mongodump: %d ms", step2.Sub(step1).Milliseconds())
+	log.Printf("Time for upload to S3: %d ms", step3.Sub(step2).Milliseconds())
+	log.Printf("Total time: %d ms", step3.Sub(start).Milliseconds())
+
+	return "Backup completed successfully and uploaded to S3", nil
+}
+
+func uploadToS3(bucket, key, filePath string) error {
+	sess, err := session.NewSession(&aws.Config{
+		Region: aws.String(os.Getenv("AWS_REGION")),
+		Credentials: credentials.NewStaticCredentials(
+			os.Getenv("AWS_ACCESS_KEY_ID"),
+			os.Getenv("AWS_SECRET_ACCESS_KEY"),
+			os.Getenv("AWS_SESSION_TOKEN"),
+		),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create session: %v", err)
 	}
 
-	if err := os.WriteFile(localLatestPath, input, 0644); err != nil {
-		return fmt.Sprintf("Failed to write latest backup file: %s", err), err
+	file, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to open file %q, %v", filePath, err)
 	}
-	copyDuration := time.Since(copyStart)
-	fmt.Printf("Tempo para copiar o arquivo de backup: %s\n", copyDuration)
+	defer file.Close()
 
-	totalDuration := time.Since(start)
-	fmt.Printf("Tempo total de execução: %s\n", totalDuration)
+	uploader := s3.New(sess)
+	_, err = uploader.PutObject(&s3.PutObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+		Body:   file,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to upload file to S3: %v", err)
+	}
 
-	return fmt.Sprintf("Backup succeeded: %s", out.String()), nil
+	return nil
 }
 
 func main() {
