@@ -13,27 +13,14 @@ RUN go mod download
 # Copia o código-fonte da aplicação para o diretório de trabalho
 COPY . .
 
-# Compila o binário executável
-RUN go build -o main .
+# Compila o binário executável para o Lambda
+RUN GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o main .
 
-# Utiliza uma imagem base oficial do Debian como a etapa final
-FROM debian:bullseye-slim
-
-# Defina o diretório de trabalho dentro do contêiner
-WORKDIR /app
-
-# Defina variáveis de ambiente para conexão
-ENV MONGODB_PARALLEL="10"
-
-# Instala as ferramentas de banco de dados MongoDB
-RUN apt-get update && apt-get install -y wget && \
-    wget https://fastdl.mongodb.org/tools/db/mongodb-database-tools-ubuntu2004-x86_64-100.7.4.deb && \
-    apt-get install -y ./mongodb-database-tools-ubuntu2004-x86_64-100.7.4.deb && \
-    rm ./mongodb-database-tools-ubuntu2004-x86_64-100.7.4.deb && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+# Utiliza uma imagem base oficial do Amazon Linux para Lambda
+FROM public.ecr.aws/lambda/provided:al2
 
 # Copia o binário executável da etapa de build para o diretório de trabalho
-COPY --from=builder /app/main .
+COPY --from=builder /app/main /var/task/main
 
-# Define o comando de entrada padrão para o contêiner
-CMD ["./main"]
+# Define o comando de entrada padrão para o contêiner Lambda
+CMD ["main"]

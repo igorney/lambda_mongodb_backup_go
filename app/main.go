@@ -8,18 +8,27 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 )
 
 func handler(_ context.Context) (string, error) {
 	start := time.Now()
+
+	// Recupera variáveis de ambiente
 	uri := os.Getenv("MONGODB_URI")
 	parallel := os.Getenv("MONGODB_PARALLEL")
+	awsRegion := os.Getenv("AWS_REGION")
+
+	if uri == "" || parallel == "" || awsRegion == "" {
+		log.Printf("Required environment variables are missing")
+		return "Failed to retrieve environment variables", fmt.Errorf("missing environment variables")
+	}
+
 	timestamp := time.Now().Format("20060102T150405")
-	archivePath := fmt.Sprintf("/app/backups/%s.dump.gz", timestamp)
+	archivePath := fmt.Sprintf("/tmp/%s.dump.gz", timestamp)
 	s3Bucket := "ufabc-next"
 	s3Key := fmt.Sprintf("mongodb-next-backup/%s.dump.gz", timestamp)
 
@@ -40,7 +49,7 @@ func handler(_ context.Context) (string, error) {
 	log.Printf("Stdout: %s", output)
 
 	// Step 3: Upload to S3
-	err = uploadToS3(s3Bucket, s3Key, archivePath)
+	err = uploadToS3(s3Bucket, s3Key, archivePath, awsRegion)
 	step3 := time.Now()
 	if err != nil {
 		log.Printf("Failed to upload to S3: %v", err)
@@ -57,14 +66,9 @@ func handler(_ context.Context) (string, error) {
 	return "Backup completed successfully and uploaded to S3", nil
 }
 
-func uploadToS3(bucket, key, filePath string) error {
+func uploadToS3(bucket, key, filePath, region string) error {
 	sess, err := session.NewSession(&aws.Config{
-		Region: aws.String(os.Getenv("AWS_REGION")),
-		Credentials: credentials.NewStaticCredentials(
-			os.Getenv("AWS_ACCESS_KEY_ID"),
-			os.Getenv("AWS_SECRET_ACCESS_KEY"),
-			os.Getenv("AWS_SESSION_TOKEN"),
-		),
+		Region: aws.String(region),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create session: %v", err)
@@ -90,11 +94,5 @@ func uploadToS3(bucket, key, filePath string) error {
 }
 
 func main() {
-	// Execute localmente
-	result, err := handler(context.Background())
-	if err != nil {
-		fmt.Println("Error:", err)
-	} else {
-		fmt.Println("Result:", result)
-	}
+	lambda.Start(handler)
 }

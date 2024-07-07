@@ -1,0 +1,47 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Set up Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.20
+
+    - name: Build application
+      run: |
+        cd app
+        go build -o main .
+
+    - name: Archive application
+      run: |
+        zip -j lambda.zip app/main
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+
+    - name: Deploy with Terraform
+      env:
+        MONGODB_URI: ${{ secrets.MONGODB_URI }}
+      run: |
+        cd infra
+        terraform init
+        terraform apply -auto-approve -var "mongodb_uri=${{ secrets.MONGODB_URI }}"
+
+    - name: Upload deployment package to S3
+      run: |
+        aws s3 cp lambda.zip s3://my-bucket/path/to/lambda.zip
