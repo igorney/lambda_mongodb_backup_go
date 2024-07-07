@@ -17,13 +17,14 @@ import (
 func handler(_ context.Context) (string, error) {
 	start := time.Now()
 	uri := os.Getenv("MONGODB_URI")
+	parallel := os.Getenv("MONGODB_PARALLEL")
 	timestamp := time.Now().Format("20060102T150405")
 	archivePath := fmt.Sprintf("/app/backups/%s.dump.gz", timestamp)
 	s3Bucket := "ufabc-next"
 	s3Key := fmt.Sprintf("mongodb-next-backup/%s.dump.gz", timestamp)
 
 	// Step 1: Construct mongodump command
-	command := exec.Command("mongodump", "--uri", uri, "--archive="+archivePath, "--gzip")
+	command := exec.Command("mongodump", "--uri", uri, "--numParallelCollections", parallel, "--archive="+archivePath, "--gzip")
 	log.Printf("Running mongodump command: %v", command.Args)
 	step1 := time.Now()
 

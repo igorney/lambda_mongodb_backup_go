@@ -23,7 +23,8 @@ FROM debian:bullseye-slim
 WORKDIR /app
 
 # Defina variáveis de ambiente para conexão
-ENV ...
+ENV MONGODB_PARALLEL="10"
+
 # Instala as ferramentas de banco de dados MongoDB
 RUN apt-get update && apt-get install -y wget && \
     wget https://fastdl.mongodb.org/tools/db/mongodb-database-tools-ubuntu2004-x86_64-100.7.4.deb && \
