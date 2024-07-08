@@ -25,6 +25,11 @@ jobs:
         cd app
         go build -o main .
 
+    - name: Run tests
+      run: |
+        cd app
+        go test ./...
+
     - name: Archive application
       run: |
         zip -j lambda.zip app/main
