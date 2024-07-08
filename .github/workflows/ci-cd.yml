@@ -28,6 +28,9 @@ jobs:
     - name: Archive application
       run: |
         zip -j lambda.zip app/main
+        
+    - name: Print environment variables
+      run: printenv
 
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v1
@@ -35,9 +38,6 @@ jobs:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: us-east-1
-
-    - name: Print environment variables
-      run: printenv
 
     - name: Deploy with Terraform
       env:
