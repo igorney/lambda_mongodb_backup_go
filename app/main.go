@@ -3,69 +3,82 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"time"
+
+	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
 )
 
-func handler(ctx context.Context) (string, error) {
-	// Valores hardcoded
-	mongodbHost := "mongodb"
-	mongodbPort := "27017"
-	mongodbUser := "root"
-	mongodbPass := "example"
-	mongodbAuthDB := "admin"
-	mongodbDB := "testdb"
-	backupFolder := "/app/backups/"
+func handler(_ context.Context) (string, error) {
+	start := time.Now()
 
-	// Certifique-se de que a pasta de backup existe
-	if _, err := os.Stat(backupFolder); os.IsNotExist(err) {
-		if err := os.MkdirAll(backupFolder, 0755); err != nil {
-			return "Failed to create backup folder", err
-		}
-	}
+	// Recupera variáveis de ambiente
+	uri := os.Getenv("MONGODB_URI")
+	parallel := os.Getenv("MONGODB_PARALLEL")
+	awsRegion := os.Getenv("AWS_REGION")
 
-	// Construção dos comandos
 	timestamp := time.Now().Format("20060102T150405")
-	backupName := fmt.Sprintf("%s.dump.gz", timestamp)
-	localBackupPath := fmt.Sprintf("%s%s", backupFolder, backupName)
-	localLatestPath := fmt.Sprintf("%slatest.dump.gz", backupFolder)
+	archivePath := fmt.Sprintf("/tmp/%s.dump.gz", timestamp)
+	s3Bucket := "ufabc-next"
+	s3Key := fmt.Sprintf("mongodb-next-backup/%s.dump.gz", timestamp)
 
-	mongodumpCmd := []string{"mongodump", "--host", mongodbHost, "--port", mongodbPort, "--archive=" + localBackupPath, "--gzip", "--authenticationDatabase=" + mongodbAuthDB}
-	if mongodbUser != "" {
-		mongodumpCmd = append(mongodumpCmd, "--username", mongodbUser)
-	}
-	if mongodbPass != "" {
-		mongodumpCmd = append(mongodumpCmd, "--password", mongodbPass)
-	}
-	if mongodbDB != "" {
-		mongodumpCmd = append(mongodumpCmd, "--db", mongodbDB)
-	}
+	// Step 1: Construct mongodump command
+	command := exec.Command("mongodump", "--uri", uri, "--numParallelCollections", parallel, "--archive="+archivePath, "--gzip")
+	log.Printf("Running mongodump command: %v", command.Args)
 
-	// Execução dos comandos
-	if err := exec.Command(mongodumpCmd[0], mongodumpCmd[1:]...).Run(); err != nil {
+	// Step 2: Execute mongodump command
+	output, err := command.CombinedOutput()
+	if err != nil {
+		log.Printf("Backup failed: %v", err)
+		log.Printf("Stderr: %s", output)
 		return "Backup failed", err
 	}
+	log.Printf("Backup completed successfully")
+	log.Printf("Stdout: %s", output)
 
-	// Copiar o backup para o arquivo mais recente
-	input, err := os.ReadFile(localBackupPath)
+	// Step 3: Upload to S3
+	err = uploadToS3(s3Bucket, s3Key, archivePath, awsRegion)
 	if err != nil {
-		return "Failed to read backup file", err
+		log.Printf("Failed to upload to S3: %v", err)
+		return "Failed to upload to S3", err
+	}
+	log.Printf("Upload to S3 completed successfully")
+
+	return fmt.Sprintf("Backup completed successfully and uploaded to S3 in %d ms", time.Since(start).Milliseconds()), nil
+}
+
+func uploadToS3(bucket, key, filePath, region string) error {
+	sess, err := session.NewSession(&aws.Config{
+		Region: aws.String(region),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create session: %v", err)
 	}
 
-	if err := os.WriteFile(localLatestPath, input, 0644); err != nil {
-		return "Failed to write latest backup file", err
+	file, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to open file %q, %v", filePath, err)
+	}
+	defer file.Close()
+
+	uploader := s3.New(sess)
+	_, err = uploader.PutObject(&s3.PutObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+		Body:   file,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to upload file to S3: %v", err)
 	}
 
-	return "Backup succeeded", nil
+	return nil
 }
 
 func main() {
-	// Execute localmente
-	result, err := handler(context.Background())
-	if err != nil {
-		fmt.Println("Error:", err)
-	} else {
-		fmt.Println("Result:", result)
-	}
+	lambda.Start(handler)
 }
