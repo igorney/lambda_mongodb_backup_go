@@ -22,11 +22,6 @@ func handler(_ context.Context) (string, error) {
 	parallel := os.Getenv("MONGODB_PARALLEL")
 	awsRegion := os.Getenv("AWS_REGION")
 
-	if uri == "" || parallel == "" || awsRegion == "" {
-		log.Printf("Required environment variables are missing")
-		return "Failed to retrieve environment variables", fmt.Errorf("missing environment variables")
-	}
-
 	timestamp := time.Now().Format("20060102T150405")
 	archivePath := fmt.Sprintf("/tmp/%s.dump.gz", timestamp)
 	s3Bucket := "ufabc-next"
@@ -35,11 +30,9 @@ func handler(_ context.Context) (string, error) {
 	// Step 1: Construct mongodump command
 	command := exec.Command("mongodump", "--uri", uri, "--numParallelCollections", parallel, "--archive="+archivePath, "--gzip")
 	log.Printf("Running mongodump command: %v", command.Args)
-	step1 := time.Now()
 
 	// Step 2: Execute mongodump command
 	output, err := command.CombinedOutput()
-	step2 := time.Now()
 	if err != nil {
 		log.Printf("Backup failed: %v", err)
 		log.Printf("Stderr: %s", output)
@@ -50,20 +43,13 @@ func handler(_ context.Context) (string, error) {
 
 	// Step 3: Upload to S3
 	err = uploadToS3(s3Bucket, s3Key, archivePath, awsRegion)
-	step3 := time.Now()
 	if err != nil {
 		log.Printf("Failed to upload to S3: %v", err)
 		return "Failed to upload to S3", err
 	}
 	log.Printf("Upload to S3 completed successfully")
 
-	// Log times
-	log.Printf("Time to construct command: %d ms", step1.Sub(start).Milliseconds())
-	log.Printf("Time to execute mongodump: %d ms", step2.Sub(step1).Milliseconds())
-	log.Printf("Time for upload to S3: %d ms", step3.Sub(step2).Milliseconds())
-	log.Printf("Total time: %d ms", step3.Sub(start).Milliseconds())
-
-	return "Backup completed successfully and uploaded to S3", nil
+	return fmt.Sprintf("Backup completed successfully and uploaded to S3 in %d ms", time.Since(start).Milliseconds()), nil
 }
 
 func uploadToS3(bucket, key, filePath, region string) error {
